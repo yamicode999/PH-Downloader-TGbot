@@ -58,7 +58,7 @@ CHANNELS = [
 ### 4. Run the Bot
 
 ```bash
-python your_bot_script.py
+python __main__.py
 ```
 
 ---
