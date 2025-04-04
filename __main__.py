@@ -1,5 +1,5 @@
 import telebot
-from telebot.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from telebot.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, ReactionTypeEmoji
 import sqlite3
 import yt_dlp
 import os
@@ -19,6 +19,7 @@ CHANNELS = [
     ("-100xxxxxxxxx", "YOUR_CHANNEL_NAME_2", "YOUR_CHANNEL_LINK_2"),
 ]
 
+MAX_DOWNLOAD_SIZE = 2 * 1024 * 1024 * 1024
 
 genders = ["♂️ Male", "♀️ Female"]
 sexual_orientations = ["💑 Straight", "🏳️‍🌈 Gay", "💜 Bisexual"]
@@ -108,7 +109,7 @@ def start(message):
         elif not user[2]:
             ask_orientation(user_id, message.message_id)
         else:
-            bot.send_message(user_id, "✅ Welcome back! You can use the bot.", reply_markup=main_menu_markup)
+            bot.send_message(user_id, "😈 Are you ready for some fun?", reply_markup=main_menu_markup)
     elif user and user[0] == "underage":
         bot.send_message(user_id, "🚫 You are under 18! If this is incorrect, use /age to update your status.")
     else:
@@ -194,10 +195,12 @@ def process_video_link(message):
 
     url = message.text.strip()
     user_id = message.chat.id
+
+    bot.set_message_reaction(chat_id=user_id, message_id=message.message_id, reaction=[ReactionTypeEmoji("😈")])
+
     loading_msg = bot.send_message(user_id, "⏳ Fetching video details, please wait...")
     thread = threading.Thread(target=fetch_video_details, args=(user_id, url, loading_msg.message_id))
     thread.start()
-
 
 def fetch_video_details(user_id, url, loading_msg_id):
     ydl_opts = {
@@ -263,6 +266,21 @@ def process_download(user_id, url, quality, downloading_msg_id):
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         try:
+            info = ydl.extract_info(url, download=False)
+
+            selected_format = next(
+                (f for f in info['formats'] if f.get('height') == int(quality) and f.get('filesize')), None)
+
+            if not selected_format or selected_format['filesize'] > MAX_DOWNLOAD_SIZE:
+                bot.delete_message(user_id, downloading_msg_id)
+                bot.send_message(user_id,
+                                 "❌ The selected quality exceeds the allowed limit! Please choose a lower quality.")
+
+                new_loading_msg = bot.send_message(user_id, "⏳ Fetching video details again, please wait...")
+
+                threading.Thread(target=fetch_video_details, args=(user_id, url, new_loading_msg.message_id)).start()
+                return
+
             info = ydl.extract_info(url, download=True)
             video_path = f'video_{user_id}.mp4'
             duration = info.get('duration', 0)
