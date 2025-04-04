@@ -4,6 +4,10 @@ import sqlite3
 import yt_dlp
 import os
 import threading
+import random
+import hashlib
+from pornhub_api import PornhubApi
+
 
 
 # Replace with your actual bot token
@@ -25,6 +29,10 @@ genders = ["♂️ Male", "♀️ Female"]
 sexual_orientations = ["💑 Straight", "🏳️‍🌈 Gay", "💜 Bisexual"]
 
 video_requests = {}
+last_search = {}
+user_seen_videos = {}
+api = PornhubApi()
+
 
 conn = sqlite3.connect("users.db", check_same_thread=False)
 cursor = conn.cursor()
@@ -202,7 +210,8 @@ def process_video_link(message):
     thread = threading.Thread(target=fetch_video_details, args=(user_id, url, loading_msg.message_id))
     thread.start()
 
-def fetch_video_details(user_id, url, loading_msg_id):
+
+def fetch_video_details(user_id, url, loading_msg_id, waiting_msg_id):
     ydl_opts = {
         'quiet': True,
         'noplaylist': True,
@@ -219,14 +228,15 @@ def fetch_video_details(user_id, url, loading_msg_id):
             uploader = info.get('uploader', 'Unknown')
             duration = info.get('duration', 0)
             thumbnail = info.get('thumbnail', '')
-            available_formats = sorted(set([fmt.get('height') for fmt in info.get('formats', []) if fmt.get('height')]),
-                                       reverse=True)
+            available_formats = sorted(set([fmt.get('height') for fmt in info.get('formats', []) if fmt.get('height')]), reverse=True)
 
             minutes, seconds = divmod(duration, 60)
             duration_text = f"{minutes}:{seconds:02d}"
             caption = f"<b>{title}</b>\n⏳ Duration: {duration_text}\n👀 Views: {views}\n👍 Likes: {likes}\n🎥 Uploader: {uploader}"
 
             bot.delete_message(user_id, loading_msg_id)
+            bot.delete_message(user_id, waiting_msg_id)
+
             video_requests[user_id] = url
 
             markup = InlineKeyboardMarkup()
@@ -269,15 +279,17 @@ def process_download(user_id, url, quality, downloading_msg_id):
             info = ydl.extract_info(url, download=False)
 
             selected_format = next(
-                (f for f in info['formats'] if f.get('height') == int(quality) and f.get('filesize')), None)
+                (f for f in info['formats'] if f.get('height') == int(quality)), None
+            )
 
-            if not selected_format or selected_format['filesize'] > MAX_DOWNLOAD_SIZE:
+            filesize = selected_format.get('filesize') if selected_format else None
+
+            if filesize and filesize > MAX_DOWNLOAD_SIZE:
                 bot.delete_message(user_id, downloading_msg_id)
                 bot.send_message(user_id,
                                  "❌ The selected quality exceeds the allowed limit! Please choose a lower quality.")
 
                 new_loading_msg = bot.send_message(user_id, "⏳ Fetching video details again, please wait...")
-
                 threading.Thread(target=fetch_video_details, args=(user_id, url, new_loading_msg.message_id)).start()
                 return
 
@@ -297,6 +309,7 @@ def process_download(user_id, url, quality, downloading_msg_id):
         except Exception as e:
             bot.send_message(user_id, f"❌ Error downloading video: {str(e)}")
 
+
 def delete_video_later(user_id, video_path, message_id):
     import time
     time.sleep(30)
@@ -307,10 +320,125 @@ def delete_video_later(user_id, video_path, message_id):
         print(f"Error deleting file/message: {str(e)}")
 
 
+def generate_video_id(video_url):
+    return hashlib.md5(video_url.encode()).hexdigest()[:10]
+
+
+def search_pornhub_video_threaded(user_id, keyword):
+    thread = threading.Thread(target=search_pornhub_video, args=(user_id, keyword))
+    thread.start()
+
+def search_pornhub_video(user_id, keyword):
+    user = get_user(user_id)
+    if not user:
+        bot.send_message(user_id, "❌ User not found in database.")
+        return
+
+    gender, orientation = user[1], user[2]
+    search_query = keyword
+    search_tags = []
+
+    if gender == "♂️ Male":
+        if orientation == "🏳️‍🌈 Gay":
+            search_tags = ["gay"]
+        elif orientation == "💜 Bisexual":
+            if random.choice([True, False]):
+                search_tags = ["gay"]
+
+    elif gender == "♀️ Female":
+        if orientation == "🏳️‍🌈 Gay":
+            search_tags = ["lesbian"]
+        elif orientation == "💜 Bisexual":
+            if random.choice([True, False]):
+                search_tags = ["lesbian"]
+
+    last_search[user_id] = search_query
+
+    if user_id not in user_seen_videos:
+        user_seen_videos[user_id] = set()
+
+    while True:
+        try:
+            if search_tags:
+                search_result = api.search.search_videos(search_query, tags=search_tags, ordering="mostviewed",
+                                                         period="weekly")
+            else:
+                search_result = api.search.search_videos(search_query, ordering="mostviewed", period="weekly")
+
+            videos_list = list(search_result)
+        except Exception as e:
+            bot.send_message(user_id, f"❌ Error fetching videos: {repr(e)}")
+            return
+
+        videos_list = [v for v in videos_list if v.video_id not in user_seen_videos[user_id]]
+
+        if not videos_list:
+            continue
+
+        video = random.choice(videos_list)
+        user_seen_videos[user_id].add(video.video_id)
+
+        title = video.title
+        video_url = f"https://www.pornhub.com/view_video.php?viewkey={video.video_id}"
+        thumb_url = video.default_thumb
+
+        video_requests[video.video_id] = video_url
+
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("⬇️ Download", callback_data=f"download_{video.video_id}"))
+        markup.add(InlineKeyboardButton("➡️ Next", callback_data="next_video"))
+
+        msg = bot.send_photo(user_id, thumb_url, caption=f"🎬 {title}\n🔗 [Watch Video]({video_url})",
+                             parse_mode="Markdown", reply_markup=markup)
+        video_requests[f"msg_{user_id}"] = msg.message_id
+        break
+
+
 @bot.message_handler(func=lambda message: message.text == "🔍 Find Video")
-def find_video_response(message):
-    response_text = "🍑 This feature will be available soon! 🔥 Based on your preferences, we'll recommend the hottest videos for you. 🔞 Stay tuned! 😉"
-    bot.reply_to(message, response_text)
+def ask_for_keyword(message):
+    bot.send_message(message.chat.id, "🔎 Enter a keyword to search for videos:")
+
+@bot.message_handler(func=lambda message: True)
+def process_keyword(message):
+    search_pornhub_video_threaded(message.chat.id, message.text.strip())
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "next_video")
+def next_video(call):
+    user_id = call.message.chat.id
+
+    if f"msg_{user_id}" in video_requests:
+        try:
+            bot.delete_message(user_id, video_requests[f"msg_{user_id}"])
+        except Exception as e:
+            print(f"Error deleting message: {e}")
+
+    if user_id in last_search:
+        thread = threading.Thread(target=search_pornhub_video, args=(user_id, last_search[user_id]))
+        thread.start()
+    else:
+        bot.send_message(user_id, "❌ No previous search found.")
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("download_"))
+def handle_download_request(call):
+    user_id = call.message.chat.id
+    video_id = call.data.replace("download_", "")
+
+    if not is_verified(user_id):
+        bot.send_message(user_id, "🚫 You must verify your age to use this feature!")
+        return
+
+    video_url = video_requests.get(video_id)
+    if not video_url:
+        bot.send_message(user_id, "❌ Video not found.")
+        return
+
+    waiting_msg = bot.send_message(user_id, "⏳ Fetching video details, please wait...")
+    waiting_msg_id = waiting_msg.message_id
+
+    thread = threading.Thread(target=fetch_video_details, args=(user_id, video_url, call.message.message_id, waiting_msg_id))
+    thread.start()
 
 
 bot.set_my_commands([
