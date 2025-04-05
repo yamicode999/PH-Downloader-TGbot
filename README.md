@@ -74,7 +74,7 @@ FFMPEG_PATH = "YOUR_FFMPEG_PATH_HERE"
 CHANNELS = [
     ("-100XXXXXXXXX", "Channel Name", "https://t.me/your_channel")
 ]
-MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024  # 2GB limit
+ADMINS = [123456789, 987654321]
 ```
 
 > 🔧 Make sure the `FFMPEG_PATH` points to the actual path of the FFmpeg binary. On most systems, it's simply `"ffmpeg"` if added to your system's PATH.
