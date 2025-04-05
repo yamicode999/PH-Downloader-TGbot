@@ -25,6 +25,22 @@ This is a Telegram bot built using Python and `pyTelegramBotAPI` (Telebot) that 
 
 ---
 
+### 🔔 Admin Tools
+
+Admins (defined in the `ADMINS` list like below) have access to special commands:
+
+```python
+ADMINS = [123456789, 987654321]
+```
+
+#### `/ad` – Broadcast Message  
+This command allows admins to send an **advertisement or announcement** to **all verified users**.  
+It's useful for updates, promotions, or important news related to the bot.
+
+> ⚠️ Make sure to keep broadcasts respectful and avoid spamming users.
+
+---
+
 ## 📦 Requirements
 
 - Python 3.8+
@@ -78,6 +94,7 @@ python __main__.py
 | `/start` | Start the bot and verify age |
 | `/age` | Reconfirm age if needed |
 | `/user` | Update gender or orientation |
+| `/ad` | **(Admin only)** Broadcast message to all verified users |
 
 ---
 
