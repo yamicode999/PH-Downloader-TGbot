@@ -6,6 +6,7 @@ import os
 import threading
 import random
 import hashlib
+import time
 from pornhub_api import PornhubApi
 
 
@@ -28,9 +29,14 @@ MAX_DOWNLOAD_SIZE = 2 * 1024 * 1024 * 1024
 genders = ["♂️ Male", "♀️ Female"]
 sexual_orientations = ["💑 Straight", "🏳️‍🌈 Gay", "💜 Bisexual"]
 
+# Replace with actual Admins ID
+ADMINS = [123456789, 987654321]
+
 video_requests = {}
 last_search = {}
 user_seen_videos = {}
+admin_states = {}
+admin_messages = {}
 api = PornhubApi()
 
 
@@ -73,6 +79,13 @@ def check_user_membership(user_id):
         except:
             pass
     return not_joined
+
+def is_verified(user_id):
+    with sqlite3.connect("users.db") as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT status FROM users WHERE user_id=?", (user_id,))
+        result = cur.fetchone()
+        return result and result[0] == "verified"
 
 def send_join_message(user_id, not_joined):
     markup = telebot.types.InlineKeyboardMarkup()
@@ -180,35 +193,159 @@ def update_user_info(message):
     user_id = message.chat.id
     ask_gender(user_id)
 
-def is_verified(user_id):
-    cursor.execute("SELECT status FROM users WHERE user_id=?", (user_id,))
-    result = cursor.fetchone()
-    return result and result[0] == "verified"
+def copy_message_to_user(msg, target_id):
+    if msg.content_type == "text":
+        bot.send_message(target_id, msg.text)
 
+    elif msg.content_type == "photo":
+        bot.send_photo(target_id, msg.photo[-1].file_id, caption=msg.caption)
+
+    elif msg.content_type == "video":
+        bot.send_video(target_id, msg.video.file_id, caption=msg.caption)
+
+    elif msg.content_type == "document":
+        bot.send_document(target_id, msg.document.file_id, caption=msg.caption)
+
+    elif msg.content_type == "audio":
+        bot.send_audio(target_id, msg.audio.file_id, caption=msg.caption)
+
+    elif msg.content_type == "voice":
+        bot.send_voice(target_id, msg.voice.file_id, caption=msg.caption)
+
+    elif msg.content_type == "sticker":
+        bot.send_sticker(target_id, msg.sticker.file_id)
+
+    elif msg.content_type == "animation":
+        bot.send_animation(target_id, msg.animation.file_id, caption=msg.caption)
+
+    elif msg.content_type == "video_note":
+        bot.send_video_note(target_id, msg.video_note.file_id)
+
+    elif msg.content_type == "location":
+        bot.send_location(target_id, latitude=msg.location.latitude, longitude=msg.location.longitude)
+
+    elif msg.content_type == "contact":
+        bot.send_contact(target_id, phone_number=msg.contact.phone_number,
+                         first_name=msg.contact.first_name, last_name=msg.contact.last_name)
+
+    else:
+        bot.send_message(target_id, "⚠️ Unsupported content type.")
+
+@bot.message_handler(commands=["finish"])
+def finish_ad_collection(message):
+    user_id = message.chat.id
+    if user_id not in ADMINS or admin_states.get(user_id) != "collecting":
+        return
+
+    admin_states[user_id] = "pending_confirmation"
+
+    bot.send_message(user_id, "🔎 Preview of your broadcast messages:")
+
+    for msg in admin_messages[user_id]:
+        copy_message_to_user(msg, user_id)
+
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton("✅ Send to all", callback_data="confirm_broadcast"),
+        InlineKeyboardButton("❌ Cancel", callback_data="cancel_broadcast")
+    )
+    bot.send_message(user_id, "Do you want to send these messages to all users?", reply_markup=markup)
+
+@bot.message_handler(commands=["ad"])
+def start_ad_collection(message):
+    user_id = message.chat.id
+    if user_id not in ADMINS:
+        return
+
+    admin_states[user_id] = "collecting"
+    admin_messages[user_id] = []
+    bot.send_message(user_id, "📥 Send the messages you want to broadcast. Use /finish when done.")
+
+@bot.message_handler(
+    func=lambda message: message.chat.id in admin_states and admin_states[message.chat.id] == "collecting",
+    content_types=[
+        "text", "photo", "video", "document", "audio", "voice",
+        "sticker", "animation", "video_note", "location", "contact"
+    ])
+def collect_admin_messages(message):
+    user_id = message.chat.id
+    admin_messages[user_id].append(message)
+
+@bot.callback_query_handler(func=lambda call: call.data in ["confirm_broadcast", "cancel_broadcast"])
+def handle_broadcast_confirmation(call):
+    user_id = call.message.chat.id
+
+    if user_id not in ADMINS:
+        return
+
+    if call.data == "cancel_broadcast":
+        bot.send_message(user_id, "❌ Broadcast canceled.")
+        admin_states[user_id] = None
+        admin_messages[user_id] = []
+        return
+
+    bot.send_message(user_id, "📤 Sending messages to all users...")
+
+    thread = threading.Thread(target=send_broadcast_messages, args=(user_id,))
+    thread.start()
+
+def send_broadcast_messages(admin_id):
+    try:
+        cursor.execute("SELECT user_id FROM users WHERE status = 'verified'")
+        all_users = cursor.fetchall()
+
+        for uid_tuple in all_users:
+            uid = uid_tuple[0]
+            for msg in admin_messages[admin_id]:
+                try:
+                    copy_message_to_user(msg, uid)
+                    time.sleep(0.1)
+                except Exception as e:
+                    print(f"❗ Error sending to {uid}: {e}")
+
+        bot.send_message(admin_id, "✅ Broadcast sent to all *verified* users successfully.")
+    except Exception as e:
+        bot.send_message(admin_id, f"❌ Error during broadcast: {e}")
+    finally:
+        admin_states[admin_id] = None
+        admin_messages[admin_id] = []
 
 @bot.message_handler(func=lambda message: message.text == "💾 Download Video")
 def request_video_link(message):
-    if not is_verified(message.chat.id):
-        bot.send_message(message.chat.id, "🚫 You must verify your age to use this feature!")
+    user_id = message.chat.id
+    if not is_verified(user_id):
+        bot.send_message(user_id, "🚫 You must verify your age to use this feature!")
         return
-    bot.send_message(message.chat.id,
+
+    not_joined = check_user_membership(user_id)
+    if not_joined:
+        send_join_message(user_id, not_joined)
+        return
+
+    bot.send_message(user_id,
                      "🔗 Please send the Pornhub video link in this format:\nhttps://www.pornhub.com/view_video.php?viewkey=xxx")
 
 
 @bot.message_handler(func=lambda message: "pornhub.com/view_video.php?viewkey=" in message.text)
 def process_video_link(message):
-    if not is_verified(message.chat.id):
-        bot.send_message(message.chat.id, "🚫 You must verify your age to use this feature!")
+    user_id = message.chat.id
+
+    if not is_verified(user_id):
+        bot.send_message(user_id, "🚫 You must verify your age to use this feature!")
+        return
+
+    not_joined = check_user_membership(user_id)
+    if not_joined:
+        send_join_message(user_id, not_joined)
         return
 
     url = message.text.strip()
-    user_id = message.chat.id
-
     bot.set_message_reaction(chat_id=user_id, message_id=message.message_id, reaction=[ReactionTypeEmoji("😈")])
 
     loading_msg = bot.send_message(user_id, "⏳ Fetching video details, please wait...")
     thread = threading.Thread(target=fetch_video_details, args=(user_id, url, loading_msg.message_id))
     thread.start()
+
 
 
 def fetch_video_details(user_id, url, loading_msg_id, waiting_msg_id):
@@ -396,11 +533,36 @@ def search_pornhub_video(user_id, keyword):
 
 @bot.message_handler(func=lambda message: message.text == "🔍 Find Video")
 def ask_for_keyword(message):
-    bot.send_message(message.chat.id, "🔎 Enter a keyword to search for videos:")
+    user_id = message.chat.id
+
+    if not is_verified(user_id):
+        bot.send_message(user_id, "🚫 You must verify your age to use this feature!")
+        return
+
+    not_joined = check_user_membership(user_id)
+    if not_joined:
+        send_join_message(user_id, not_joined)
+        return
+
+    bot.send_message(user_id, "🔎 Enter a keyword to search for videos:")
 
 @bot.message_handler(func=lambda message: True)
 def process_keyword(message):
-    search_pornhub_video_threaded(message.chat.id, message.text.strip())
+    user_id = message.chat.id
+
+    if user_id in admin_states and admin_states[user_id] == "collecting":
+        return
+
+    if not is_verified(user_id):
+        bot.send_message(user_id, "🚫 You must verify your age to use this feature!")
+        return
+
+    not_joined = check_user_membership(user_id)
+    if not_joined:
+        send_join_message(user_id, not_joined)
+        return
+
+    search_pornhub_video_threaded(user_id, message.text.strip())
 
 
 @bot.callback_query_handler(func=lambda call: call.data == "next_video")
@@ -446,7 +608,5 @@ bot.set_my_commands([
     telebot.types.BotCommand("age", "Update your age confirmation"),
     telebot.types.BotCommand("user", "Update your gender and orientation")
 ])
-
-
 
 bot.polling()
