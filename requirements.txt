@@ -1,3 +1,10 @@
-pyTelegramBotAPI
-yt-dlp
-pornhub-api
+certifi==2025.1.31
+charset-normalizer==3.4.1
+idna==3.10
+pornhub-api==0.4.0
+pydantic==1.10.21
+pyTelegramBotAPI==4.26.0
+requests==2.32.3
+typing_extensions==4.13.1
+urllib3==2.3.0
+yt-dlp==2025.3.31
