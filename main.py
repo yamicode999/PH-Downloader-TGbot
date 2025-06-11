@@ -263,7 +263,7 @@ async def quality_callback(client, callback_query):
         logger.error(f"Error in quality callback for user {callback_query.from_user.id}: {e}")
 
 # Start the bot
-if __name__ == "main":
+if __name__ == "__main__":
     try:
         logger.info("Starting bot...")
         app.run()
