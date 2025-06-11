@@ -374,8 +374,18 @@ def fetch_video_details(user_id, url, loading_msg_id, waiting_msg_id):
             duration_text = f"{minutes}:{seconds:02d}"
             caption = f"<b>{title}</b>\n⏳ Duration: {duration_text}\n👀 Views: {views}\n👍 Likes: {likes}\n🎥 Uploader: {uploader}"
 
-            bot.delete_message(user_id, loading_msg_id)
-            bot.delete_message(user_id, waiting_msg_id)
+            # Try to delete messages with error handling
+            try:
+                if loading_msg_id:
+                    bot.delete_message(user_id, loading_msg_id)
+            except Exception as e:
+                print(f"Error deleting loading message: {e}")
+
+            try:
+                if waiting_msg_id:
+                    bot.delete_message(user_id, waiting_msg_id)
+            except Exception as e:
+                print(f"Error deleting waiting message: {e}")
 
             video_requests[user_id] = url
 
@@ -386,6 +396,13 @@ def fetch_video_details(user_id, url, loading_msg_id, waiting_msg_id):
             msg = bot.send_photo(user_id, thumbnail, caption=caption, reply_markup=markup, parse_mode='HTML')
             video_requests[f"msg_{user_id}"] = msg.message_id
         except Exception as e:
+            # Try to delete loading message if it exists
+            try:
+                if loading_msg_id:
+                    bot.delete_message(user_id, loading_msg_id)
+            except Exception as del_e:
+                print(f"Error deleting loading message: {del_e}")
+            
             bot.send_message(user_id, f"❌ Error fetching video details: {str(e)}")
 
 
