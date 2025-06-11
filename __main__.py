@@ -16,7 +16,7 @@ TOKEN = "7565788963:AAEQyRSzb-0zP3q7kE5B1skcwpNwkPWIOX4"
 bot = telebot.TeleBot(TOKEN)
 
 # Replace with the actual path to your FFMPEG executable
-FFMPEG_PATH = "dddddd"
+FFMPEG_PATH = "/usr/bin/ffmpeg"
 
 CHANNELS = [
     # Replace with actual channel ID, name, and link
