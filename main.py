@@ -29,9 +29,7 @@ FFMPEG_PATH = "/usr/bin/ffmpeg"
 MAX_DOWNLOAD_SIZE = 2 * 1024 * 1024 * 1024  # 2GB
 MAX_RETRIES = 3
 DOWNLOAD_TIMEOUT = 300  # 5 minutes
-CHUNK_SIZE = 10485760  # 10MB
-UPLOAD_CHUNK_SIZE = 524288  # 512KB for better rate limit handling
-UPLOAD_SLEEP_TIME = 1  # 1 second sleep between chunks
+##CHUNK_SIZE = 10485760  # 10MB
 
 # Global State Management
 video_requests = {}
@@ -130,7 +128,7 @@ async def process_download(user_id, url, quality, status_msg_id):
                 'quiet': True,
                 'retries': 3,
                 'socket_timeout': DOWNLOAD_TIMEOUT,
-                'http_chunk_size': CHUNK_SIZE,
+                ##'http_chunk_size': CHUNK_SIZE,
                 'ffmpeg_location': FFMPEG_PATH,
                 'extractor_retries': 3,
                 'fragment_retries': 3,
@@ -182,11 +180,18 @@ async def process_download(user_id, url, quality, status_msg_id):
                 await update_status("⏳ Uploading video to Telegram...")
                 
                 async def progress_callback(current, total):
-                    nonlocal last_progress
+                    nonlocal last_progress, current_msg_id
                     if current_msg_id:
                         progress = int((current * 100) / total)
                         if progress >= last_progress + 20 or progress == 100:
-                            await update_status(f"⏳ Uploading: {progress}%")
+                            if progress == 100:
+                                try:
+                                    await app.delete_messages(user_id, current_msg_id)
+                                    current_msg_id = None
+                                except Exception as e:
+                                    logger.error(f"Error deleting status message: {e}")
+                            else:
+                                await update_status(f"⏳ Uploading: {progress}%")
                             last_progress = progress
                         await asyncio.sleep(1)  # Add 1 second sleep between chunks
 
@@ -225,18 +230,11 @@ async def process_download(user_id, url, quality, status_msg_id):
 async def start_command(client, message):
     try:
         user_id = message.from_user.id
-        await message.reply_text("😈 Welcome to the video downloader bot!\nUse /download to start downloading videos.")
+        await message.reply_text("🔗 Please send the Pornhub video link in this format:\nhttps://www.pornhub.com/view_video.php?viewkey=xxx")
     except Exception as e:
         logger.error(f"Error in start command for user {message.from_user.id}: {e}")
         await message.reply_text("❌ An error occurred. Please try again later.")
 
-@app.on_message(filters.command("download"))
-async def download_video_command(client, message):
-    try:
-        user_id = message.from_user.id
-        await message.reply_text("🔗 Please send the Pornhub video link in this format:\nhttps://www.pornhub.com/view_video.php?viewkey=xxx")
-    except Exception as e:
-        logger.error(f"Error in download_video command for user {message.from_user.id}: {e}")
 
 @app.on_message(filters.text & filters.regex("pornhub.com/view_video.php\\?viewkey="))
 async def process_video_link_command(client, message):
@@ -245,6 +243,7 @@ async def process_video_link_command(client, message):
         url = message.text.strip()
         loading_msg = await message.reply_text("⏳ Fetching video details, please wait...")
         await fetch_video_details(user_id, url, loading_msg.id)
+        await message.delete()
     except Exception as e:
         logger.error(f"Error in process_video_link command for user {message.from_user.id}: {e}")
 
