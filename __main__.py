@@ -8,6 +8,7 @@ from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
 from pyrogram.errors import MessageNotModified, MessageDeleteForbidden
 from pornhub_api import PornhubApi
+import requests
 
 # Configure logging
 logging.basicConfig(
@@ -279,19 +280,42 @@ async def process_download(user_id, url, quality, status_msg_id):
                 info = ydl.extract_info(url, download=True)
                 video_path = f'video_{user_id}.mp4'
                 duration = info.get('duration', 0)
+                thumbnail = info.get('thumbnail', '')
+
+                # Download thumbnail if available
+                thumb_path = None
+                if thumbnail:
+                    try:
+                        thumb_path = f'thumb_{user_id}.jpg'
+                        response = requests.get(thumbnail)
+                        if response.status_code == 200:
+                            with open(thumb_path, 'wb') as f:
+                                f.write(response.content)
+                    except Exception as e:
+                        logger.error(f"Error downloading thumbnail: {e}")
+                        thumb_path = None
 
                 await update_status("⏳ Uploading video to Telegram...")
+                
+                async def progress_callback(current, total):
+                    if current_msg_id:
+                        progress = current * 100 / total
+                        await update_status(f"⏳ Uploading: {progress:.1f}%")
+
                 sent_message = await app.send_video(
                     user_id,
                     video_path,
                     duration=duration,
-                    progress=lambda current, total: update_status(
-                        f"⏳ Uploading: {current * 100 / total:.1f}%"
-                    ) if current_msg_id else None
+                    progress=progress_callback,
+                    thumb=thumb_path if thumb_path else None
                 )
 
-                await app.send_message(user_id, "⚠️ Save the video in your saved messages. It will be deleted in 30 seconds.")
-                asyncio.create_task(delete_video_later(user_id, video_path, sent_message.id))
+                # Clean up temporary files
+                if os.path.exists(video_path):
+                    os.remove(video_path)
+                if thumb_path and os.path.exists(thumb_path):
+                    os.remove(thumb_path)
+
                 return
 
         except Exception as e:
@@ -303,18 +327,6 @@ async def process_download(user_id, url, quality, status_msg_id):
             else:
                 await app.send_message(user_id, f"❌ Error downloading video after {max_retries} attempts: {str(e)}")
                 return
-
-async def delete_video_later(user_id, video_path, message_id):
-    try:
-        await asyncio.sleep(30)
-        if os.path.exists(video_path):
-            os.remove(video_path)
-        try:
-            await app.delete_messages(user_id, message_id)
-        except Exception as e:
-            logger.error(f"Error deleting message {message_id}: {e}")
-    except Exception as e:
-        logger.error(f"Error in delete_video_later for user {user_id}: {e}")
 
 async def search_pornhub_video(user_id, keyword):
     try:
