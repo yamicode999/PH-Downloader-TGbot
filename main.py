@@ -193,7 +193,6 @@ async def process_download(user_id, url, quality, status_msg_id):
                             else:
                                 await update_status(f"⏳ Uploading: {progress}%")
                             last_progress = progress
-                        await asyncio.sleep(1)  # Add 1 second sleep between chunks
 
                 sent_message = await app.send_video(
                     user_id,
