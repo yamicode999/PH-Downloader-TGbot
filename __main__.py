@@ -342,9 +342,13 @@ def process_video_link(message):
     bot.set_message_reaction(chat_id=user_id, message_id=message.message_id, reaction=[ReactionTypeEmoji("😈")])
 
     loading_msg = bot.send_message(user_id, "⏳ Fetching video details, please wait...")
-    thread = threading.Thread(target=fetch_video_details, args=(user_id, url, loading_msg.message_id))
+    
+    # Assuming you want to pass a waiting message ID, like loading_msg.message_id
+    waiting_msg_id = loading_msg.message_id  # or a different value if needed
+    
+    # Ensure you're passing all required arguments: user_id, url, loading_msg_id, waiting_msg_id
+    thread = threading.Thread(target=fetch_video_details, args=(user_id, url, loading_msg.message_id, waiting_msg_id))
     thread.start()
-
 
 
 def fetch_video_details(user_id, url, loading_msg_id, waiting_msg_id):
