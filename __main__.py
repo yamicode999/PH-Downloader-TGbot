@@ -31,11 +31,6 @@ MAX_RETRIES = 3
 DOWNLOAD_TIMEOUT = 300  # 5 minutes
 CHUNK_SIZE = 10485760  # 10MB
 
-# Channel Configuration
-CHANNELS = [
-    ("-1002618499760", "IVR PH", "https://t.me/ivrph3629")
-]
-
 # User Preferences
 genders = ["♂️ Male", "♀️ Female"]
 sexual_orientations = ["💑 Straight", "🏳️‍🌈 Gay", "💜 Bisexual"]
@@ -45,8 +40,6 @@ ADMINS = [1684007473]
 
 # Global State Management
 video_requests = {}
-last_search = {}
-user_seen_videos = {}
 api = PornhubApi()
 
 # Initialize Pyrogram Client
@@ -228,6 +221,7 @@ async def process_download(user_id, url, quality, status_msg_id):
     max_retries = MAX_RETRIES
     retry_count = 0
     current_msg_id = status_msg_id
+    last_progress = 0
 
     async def update_status(text):
         nonlocal current_msg_id
@@ -297,10 +291,14 @@ async def process_download(user_id, url, quality, status_msg_id):
 
                 await update_status("⏳ Uploading video to Telegram...")
                 
+                last_progress = 0
                 async def progress_callback(current, total):
+                    nonlocal last_progress
                     if current_msg_id:
-                        progress = current * 100 / total
-                        await update_status(f"⏳ Uploading: {progress:.1f}%")
+                        progress = int((current * 100) / total)
+                        if progress >= last_progress + 20 or progress == 100:
+                            await update_status(f"⏳ Uploading: {progress}%")
+                            last_progress = progress
 
                 sent_message = await app.send_video(
                     user_id,
@@ -328,86 +326,6 @@ async def process_download(user_id, url, quality, status_msg_id):
                 await app.send_message(user_id, f"❌ Error downloading video after {max_retries} attempts: {str(e)}")
                 return
 
-async def search_pornhub_video(user_id, keyword):
-    try:
-        user = get_user(user_id)
-        if not user:
-            await app.send_message(user_id, "❌ User not found in database.")
-            return
-
-        gender, orientation = user[1], user[2]
-        search_query = keyword
-        search_tags = []
-
-        if gender == "♂️ Male":
-            if orientation == "🏳️‍🌈 Gay":
-                search_tags = ["gay"]
-            elif orientation == "💜 Bisexual":
-                if random.choice([True, False]):
-                    search_tags = ["gay"]
-        elif gender == "♀️ Female":
-            if orientation == "🏳️‍🌈 Gay":
-                search_tags = ["lesbian"]
-            elif orientation == "💜 Bisexual":
-                if random.choice([True, False]):
-                    search_tags = ["lesbian"]
-
-        last_search[user_id] = search_query
-
-        if user_id not in user_seen_videos:
-            user_seen_videos[user_id] = set()
-
-        try:
-            if search_tags:
-                search_result = api.search.search_videos(
-                    search_query,
-                    tags=search_tags,
-                    ordering="mostviewed",
-                    period="weekly"
-                )
-            else:
-                search_result = api.search.search_videos(
-                    search_query,
-                    ordering="mostviewed",
-                    period="weekly"
-                )
-
-            videos_list = [v for v in search_result if v.video_id not in user_seen_videos[user_id]]
-
-            if not videos_list:
-                await app.send_message(user_id, "❌ No more videos found. Try a different search term.")
-                return
-
-            video = random.choice(videos_list)
-            user_seen_videos[user_id].add(video.video_id)
-
-            title = video.title
-            video_url = f"https://www.pornhub.com/view_video.php?viewkey={video.video_id}"
-            thumb_url = video.default_thumb
-
-            video_requests[video.video_id] = video_url
-
-            markup = InlineKeyboardMarkup([
-                [InlineKeyboardButton("⬇️ Download", callback_data=f"download_{video.video_id}")],
-                [InlineKeyboardButton("➡️ Next", callback_data="next_video")]
-            ])
-
-            msg = await app.send_photo(
-                user_id,
-                thumb_url,
-                caption=f"🎬 {title}\n🔗 [Watch Video]({video_url})",
-                reply_markup=markup
-            )
-            video_requests[f"msg_{user_id}"] = msg.id
-
-        except Exception as e:
-            logger.error(f"Error in video search for user {user_id}: {e}")
-            await app.send_message(user_id, "❌ Error searching for videos. Please try again.")
-
-    except Exception as e:
-        logger.error(f"Error in search_pornhub_video for user {user_id}: {e}")
-        await app.send_message(user_id, "❌ An error occurred. Please try again.")
-
 # Command Handlers
 @app.on_message(filters.command("start"))
 async def start_command(client, message):
@@ -416,10 +334,7 @@ async def start_command(client, message):
         user = get_user(user_id)
 
         if user and user[0] == "verified":
-            not_joined = await check_user_membership(user_id)
-            if not_joined:
-                await send_join_message(user_id, not_joined)
-            elif not user[1]:
+            if not user[1]:
                 await ask_gender(user_id)
             elif not user[2]:
                 await ask_orientation(user_id, message.id)
@@ -461,34 +376,12 @@ async def update_user_command(client, message):
     except Exception as e:
         logger.error(f"Error in update_user command for user {message.from_user.id}: {e}")
 
-@app.on_message(filters.text & filters.regex("^🔍 Find Video$"))
-async def find_video_command(client, message):
-    try:
-        user_id = message.from_user.id
-        if not is_verified(user_id):
-            await app.send_message(user_id, "🚫 You must verify your age to use this feature!")
-            return
-
-        not_joined = await check_user_membership(user_id)
-        if not_joined:
-            await send_join_message(user_id, not_joined)
-            return
-
-        await app.send_message(user_id, "🔎 Enter a keyword to search for videos:")
-    except Exception as e:
-        logger.error(f"Error in find_video command for user {message.from_user.id}: {e}")
-
 @app.on_message(filters.text & filters.regex("^💾 Download Video$"))
 async def download_video_command(client, message):
     try:
         user_id = message.from_user.id
         if not is_verified(user_id):
             await app.send_message(user_id, "🚫 You must verify your age to use this feature!")
-            return
-
-        not_joined = await check_user_membership(user_id)
-        if not_joined:
-            await send_join_message(user_id, not_joined)
             return
 
         await app.send_message(user_id,
@@ -504,33 +397,11 @@ async def process_video_link_command(client, message):
             await app.send_message(user_id, "🚫 You must verify your age to use this feature!")
             return
 
-        not_joined = await check_user_membership(user_id)
-        if not_joined:
-            await send_join_message(user_id, not_joined)
-            return
-
         url = message.text.strip()
         loading_msg = await app.send_message(user_id, "⏳ Fetching video details, please wait...")
         await fetch_video_details(user_id, url, loading_msg.id)
     except Exception as e:
         logger.error(f"Error in process_video_link command for user {message.from_user.id}: {e}")
-
-@app.on_message(filters.text)
-async def process_keyword_command(client, message):
-    try:
-        user_id = message.from_user.id
-        if not is_verified(user_id):
-            await app.send_message(user_id, "🚫 You must verify your age to use this feature!")
-            return
-
-        not_joined = await check_user_membership(user_id)
-        if not_joined:
-            await send_join_message(user_id, not_joined)
-            return
-
-        await search_pornhub_video(user_id, message.text.strip())
-    except Exception as e:
-        logger.error(f"Error in process_keyword command for user {message.from_user.id}: {e}")
 
 # Callback Query Handlers
 @app.on_callback_query(filters.regex("^verify"))
@@ -539,11 +410,7 @@ async def verify_callback(client, callback_query):
         user_id = callback_query.from_user.id
         set_user(user_id, status="verified")
         await callback_query.message.delete()
-        not_joined = await check_user_membership(user_id)
-        if not_joined:
-            await send_join_message(user_id, not_joined)
-        else:
-            await ask_gender(user_id)
+        await ask_gender(user_id)
         await callback_query.answer()
     except Exception as e:
         logger.error(f"Error in verify callback for user {callback_query.from_user.id}: {e}")
@@ -599,45 +466,6 @@ async def quality_callback(client, callback_query):
         await callback_query.answer()
     except Exception as e:
         logger.error(f"Error in quality callback for user {callback_query.from_user.id}: {e}")
-
-@app.on_callback_query(filters.regex("^next_video$"))
-async def next_video_callback(client, callback_query):
-    try:
-        user_id = callback_query.from_user.id
-        if f"msg_{user_id}" in video_requests:
-            try:
-                await callback_query.message.delete()
-            except Exception as e:
-                logger.error(f"Error deleting message: {e}")
-
-        if user_id in last_search:
-            await search_pornhub_video(user_id, last_search[user_id])
-        else:
-            await app.send_message(user_id, "❌ No previous search found.")
-        await callback_query.answer()
-    except Exception as e:
-        logger.error(f"Error in next_video callback for user {callback_query.from_user.id}: {e}")
-
-@app.on_callback_query(filters.regex("^download_"))
-async def download_callback(client, callback_query):
-    try:
-        user_id = callback_query.from_user.id
-        video_id = callback_query.data.replace("download_", "")
-
-        if not is_verified(user_id):
-            await app.send_message(user_id, "🚫 You must verify your age to use this feature!")
-            return
-
-        video_url = video_requests.get(video_id)
-        if not video_url:
-            await app.send_message(user_id, "❌ Video not found.")
-            return
-
-        waiting_msg = await app.send_message(user_id, "⏳ Fetching video details, please wait...")
-        await fetch_video_details(user_id, video_url, waiting_msg.id)
-        await callback_query.answer()
-    except Exception as e:
-        logger.error(f"Error in download callback for user {callback_query.from_user.id}: {e}")
 
 # Start the bot
 if __name__ == "__main__":
