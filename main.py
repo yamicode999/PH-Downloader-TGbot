@@ -30,6 +30,8 @@ MAX_DOWNLOAD_SIZE = 2 * 1024 * 1024 * 1024  # 2GB
 MAX_RETRIES = 3
 DOWNLOAD_TIMEOUT = 300  # 5 minutes
 CHUNK_SIZE = 10485760  # 10MB
+UPLOAD_CHUNK_SIZE = 524288  # 512KB for better rate limit handling
+UPLOAD_SLEEP_TIME = 1  # 1 second sleep between chunks
 
 # Global State Management
 video_requests = {}
@@ -186,6 +188,7 @@ async def process_download(user_id, url, quality, status_msg_id):
                         if progress >= last_progress + 20 or progress == 100:
                             await update_status(f"⏳ Uploading: {progress}%")
                             last_progress = progress
+                        await asyncio.sleep(1)  # Add 1 second sleep between chunks
 
                 sent_message = await app.send_video(
                     user_id,
@@ -194,7 +197,12 @@ async def process_download(user_id, url, quality, status_msg_id):
                     progress=progress_callback,
                     thumb=thumb_path if thumb_path else None,
                     supports_streaming=True,
-                    file_name=video_filename  # Use original video title as filename
+                    caption=video_filename,
+                    disable_notification=True,
+                    chunk_size=524288,  # 512KB chunks for better rate limit handling
+                    read_timeout=30,  # Increase read timeout
+                    write_timeout=30,  # Increase write timeout
+                    connect_timeout=30  # Increase connection timeout
                 )
 
                 # Clean up temporary files
@@ -220,17 +228,16 @@ async def process_download(user_id, url, quality, status_msg_id):
 async def start_command(client, message):
     try:
         user_id = message.from_user.id
-        await app.send_message(user_id, "😈 Welcome to the video downloader bot!\nUse /download to start downloading videos.")
+        await message.reply_text("😈 Welcome to the video downloader bot!\nUse /download to start downloading videos.")
     except Exception as e:
         logger.error(f"Error in start command for user {message.from_user.id}: {e}")
-        await app.send_message(message.from_user.id, "❌ An error occurred. Please try again later.")
+        await message.reply_text("❌ An error occurred. Please try again later.")
 
 @app.on_message(filters.command("download"))
 async def download_video_command(client, message):
     try:
         user_id = message.from_user.id
-        await app.send_message(user_id,
-                         "🔗 Please send the Pornhub video link in this format:\nhttps://www.pornhub.com/view_video.php?viewkey=xxx")
+        await message.reply_text("🔗 Please send the Pornhub video link in this format:\nhttps://www.pornhub.com/view_video.php?viewkey=xxx")
     except Exception as e:
         logger.error(f"Error in download_video command for user {message.from_user.id}: {e}")
 
@@ -239,7 +246,7 @@ async def process_video_link_command(client, message):
     try:
         user_id = message.from_user.id
         url = message.text.strip()
-        loading_msg = await app.send_message(user_id, "⏳ Fetching video details, please wait...")
+        loading_msg = await message.reply_text("⏳ Fetching video details, please wait...")
         await fetch_video_details(user_id, url, loading_msg.id)
     except Exception as e:
         logger.error(f"Error in process_video_link command for user {message.from_user.id}: {e}")
@@ -252,11 +259,11 @@ async def quality_callback(client, callback_query):
         url = video_requests.get(user_id)
 
         if not url:
-            await app.send_message(user_id, "❌ No video request found.")
+            await callback_query.message.reply_text("❌ No video request found.")
             return
 
         await callback_query.message.delete()
-        status_msg = await app.send_message(user_id, f"⏳ Downloading video in {quality}p...")
+        status_msg = await callback_query.message.reply_text(f"⏳ Downloading video in {quality}p...")
         await process_download(user_id, url, quality, status_msg.id)
         await callback_query.answer()
     except Exception as e:
