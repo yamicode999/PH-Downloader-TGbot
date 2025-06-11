@@ -12,11 +12,11 @@ from pornhub_api import PornhubApi
 
 
 # Replace with your actual bot token
-TOKEN = "YOUR_BOT_TOKEN_HERE"
+TOKEN = "7565788963:AAEQyRSzb-0zP3q7kE5B1skcwpNwkPWIOX4"
 bot = telebot.TeleBot(TOKEN)
 
 # Replace with the actual path to your FFMPEG executable
-FFMPEG_PATH = "7565788963:AAEQyRSzb-0zP3q7kE5B1skcwpNwkPWIOX4"
+FFMPEG_PATH = "dddddd"
 
 CHANNELS = [
     # Replace with actual channel ID, name, and link
