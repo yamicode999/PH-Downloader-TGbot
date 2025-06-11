@@ -16,12 +16,11 @@ TOKEN = "YOUR_BOT_TOKEN_HERE"
 bot = telebot.TeleBot(TOKEN)
 
 # Replace with the actual path to your FFMPEG executable
-FFMPEG_PATH = "YOUR_FFMPEG_PATH_HERE"
+FFMPEG_PATH = "7565788963:AAEQyRSzb-0zP3q7kE5B1skcwpNwkPWIOX4"
 
 CHANNELS = [
     # Replace with actual channel ID, name, and link
-    ("-100xxxxxxxxx", "YOUR_CHANNEL_NAME_1", "YOUR_CHANNEL_LINK_1"),
-    ("-100xxxxxxxxx", "YOUR_CHANNEL_NAME_2", "YOUR_CHANNEL_LINK_2"),
+    ("-1002618499760", "IVR PH", "https://t.me/ivrph3629")
 ]
 
 MAX_DOWNLOAD_SIZE = 2 * 1024 * 1024 * 1024
