@@ -258,6 +258,36 @@ def fetch_video_details(user_id, url, loading_msg_id, waiting_msg_id):
 def process_download(user_id, url, quality, downloading_msg_id):
     max_retries = MAX_RETRIES
     retry_count = 0
+    current_msg_id = downloading_msg_id
+    
+    def update_status_message(text):
+        nonlocal current_msg_id
+        try:
+            if current_msg_id:
+                msg = bot.edit_message_text(
+                    text,
+                    user_id,
+                    current_msg_id
+                )
+                current_msg_id = msg.message_id
+        except Exception as e:
+            logger.error(f"Error updating status message: {e}")
+            try:
+                # If message edit fails, send a new message
+                msg = bot.send_message(user_id, text)
+                current_msg_id = msg.message_id
+            except Exception as send_e:
+                logger.error(f"Error sending new status message: {send_e}")
+                current_msg_id = None
+
+    def delete_status_message():
+        nonlocal current_msg_id
+        if current_msg_id:
+            try:
+                bot.delete_message(user_id, current_msg_id)
+                current_msg_id = None
+            except Exception as e:
+                logger.error(f"Error deleting status message: {e}")
     
     while retry_count < max_retries:
         try:
@@ -288,27 +318,23 @@ def process_download(user_id, url, quality, downloading_msg_id):
                 filesize = selected_format.get('filesize') if selected_format else None
 
                 if filesize and filesize > MAX_DOWNLOAD_SIZE:
-                    try:
-                        bot.delete_message(user_id, downloading_msg_id)
-                    except Exception as e:
-                        logger.error(f"Error deleting downloading message: {e}")
-                    
+                    delete_status_message()
                     bot.send_message(user_id,
                                  "❌ The selected quality exceeds the allowed limit! Please choose a lower quality.")
                     return
 
+                update_status_message(f"⏳ Downloading video in {quality}p... (Attempt {retry_count + 1}/{max_retries})")
                 info = ydl.extract_info(url, download=True)
                 video_path = f'video_{user_id}.mp4'
                 duration = info.get('duration', 0)
 
-                try:
-                    bot.delete_message(user_id, downloading_msg_id)
-                except Exception as e:
-                    logger.error(f"Error deleting downloading message: {e}")
+                delete_status_message()
+                update_status_message("⏳ Uploading video to Telegram...")
 
                 with open(video_path, 'rb') as video_file:
                     sent_message = bot.send_video(user_id, video=video_file, duration=duration)
 
+                delete_status_message()
                 bot.send_message(user_id, "⚠️ Save the video in your saved messages. It will be deleted in 30 seconds.")
                 threading.Thread(target=delete_video_later, args=(user_id, video_path, sent_message.message_id)).start()
                 return
@@ -316,21 +342,11 @@ def process_download(user_id, url, quality, downloading_msg_id):
         except Exception as e:
             retry_count += 1
             if retry_count < max_retries:
-                try:
-                    bot.edit_message_text(
-                        f"⏳ Download attempt {retry_count} failed. Retrying... ({retry_count}/{max_retries})",
-                        user_id,
-                        downloading_msg_id
-                    )
-                except Exception as edit_e:
-                    logger.error(f"Error updating download status message: {edit_e}")
+                update_status_message(f"⏳ Download attempt {retry_count} failed. Retrying... ({retry_count}/{max_retries})")
                 time.sleep(5)
                 continue
             else:
-                try:
-                    bot.delete_message(user_id, downloading_msg_id)
-                except Exception as del_e:
-                    logger.error(f"Error deleting downloading message: {del_e}")
+                delete_status_message()
                 bot.send_message(user_id, f"❌ Error downloading video after {max_retries} attempts: {str(e)}")
                 return
 
