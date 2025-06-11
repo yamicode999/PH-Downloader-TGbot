@@ -29,7 +29,7 @@ genders = ["♂️ Male", "♀️ Female"]
 sexual_orientations = ["💑 Straight", "🏳️‍🌈 Gay", "💜 Bisexual"]
 
 # Replace with actual Admins ID
-ADMINS = [123456789, 987654321]
+ADMINS = [1684007473]
 
 video_requests = {}
 last_search = {}
