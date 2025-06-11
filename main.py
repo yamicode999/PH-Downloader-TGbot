@@ -199,10 +199,7 @@ async def process_download(user_id, url, quality, status_msg_id):
                     supports_streaming=True,
                     caption=video_filename,
                     disable_notification=True,
-                    chunk_size=524288,  # 512KB chunks for better rate limit handling
-                    read_timeout=30,  # Increase read timeout
-                    write_timeout=30,  # Increase write timeout
-                    connect_timeout=30  # Increase connection timeout
+                    
                 )
 
                 # Clean up temporary files
